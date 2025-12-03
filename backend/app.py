@@ -3,6 +3,7 @@ import logging
 import json
 from datetime import datetime
 from collections import deque
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from typing import Optional, List
@@ -15,7 +16,61 @@ from auth import router as auth_router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app")
 
-app = FastAPI()
+# ---------------------------
+# LIFESPAN CONTEXT MANAGER (Modern FastAPI startup/shutdown)
+# ---------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    load_dotenv()
+    
+    # Load sensor history from file
+    load_history()
+    
+    # Create tables if they don't exist (requires Supabase permissions)
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created/verified successfully")
+    except Exception as e:
+        logger.warning("DB init warning: %s", str(e))
+
+    # Try connecting once to validate DB connectivity and log a redacted DSN
+    try:
+        dsn = os.getenv("SUPABASE_URI", "")
+        redacted = dsn
+        if redacted:
+            # redact credentials in logs
+            # e.g. postgres://user:pass@host:port/db -> postgres://user:****@host:port/db
+            import re
+            redacted = re.sub(r":([^:@/]+)@", r":****@", redacted)
+        with engine.connect() as conn:
+            # SQLAlchemy 2.0 requires text/driver_sql for raw execution
+            conn.exec_driver_sql("SELECT 1")
+            logger.info(
+                "Database connection OK (dialect=%s): %s",
+                engine.dialect.name,
+                redacted or "<not set>",
+            )
+            # Ensure vehicle_id column exists on users table (Postgres only)
+            # This runs AFTER create_all to handle existing tables
+            if engine.dialect.name.startswith("postgres"):
+                try:
+                    conn.exec_driver_sql(
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS vehicle_id VARCHAR(255)"
+                    )
+                    conn.commit()
+                    logger.info("Verified vehicle_id column exists in users table")
+                except Exception as e2:
+                    logger.warning("Schema check for vehicle_id failed (non-fatal): %s", str(e2))
+    except Exception as e:
+        logger.error("Database connection failed: %s", str(e))
+    
+    yield  # Application is running
+    
+    # Shutdown logic (if needed)
+    logger.info("Application shutting down...")
+
+app = FastAPI(lifespan=lifespan)
 
 # ---------------------------
 # ENABLE CORS FOR VITE FRONTEND
@@ -237,52 +292,8 @@ def get_history(limit: int = 100):
 # ==========================================
 # Database init and auth routes
 # ==========================================
-load_dotenv()
-
-@app.on_event("startup")
-def on_startup():
-    # Load sensor history from file
-    load_history()
-    
-    # Create tables if they don't exist (requires Supabase permissions)
-    try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created/verified successfully")
-    except Exception as e:
-        logger.warning("DB init warning: %s", str(e))
-
-    # Try connecting once to validate DB connectivity and log a redacted DSN
-    try:
-        dsn = os.getenv("SUPABASE_URI", "")
-        redacted = dsn
-        if redacted:
-            # redact credentials in logs
-            # e.g. postgres://user:pass@host:port/db -> postgres://user:****@host:port/db
-            import re
-            redacted = re.sub(r":([^:@/]+)@", r":****@", redacted)
-        with engine.connect() as conn:
-            # SQLAlchemy 2.0 requires text/driver_sql for raw execution
-            conn.exec_driver_sql("SELECT 1")
-            logger.info(
-                "Database connection OK (dialect=%s): %s",
-                engine.dialect.name,
-                redacted or "<not set>",
-            )
-            # Ensure vehicle_id column exists on users table (Postgres only)
-            # This runs AFTER create_all to handle existing tables
-            if engine.dialect.name.startswith("postgres"):
-                try:
-                    conn.exec_driver_sql(
-                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS vehicle_id VARCHAR(255)"
-                    )
-                    conn.commit()
-                    logger.info("Verified vehicle_id column exists in users table")
-                except Exception as e2:
-                    logger.warning("Schema check for vehicle_id failed (non-fatal): %s", str(e2))
-    except Exception as e:
-        logger.error("Database connection failed: %s", str(e))
-
-
+# INCLUDE AUTH ROUTER
+# ==========================================
 app.include_router(auth_router)
 
 

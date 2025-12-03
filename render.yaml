@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: digitaltwin-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - key: SUPABASE_URI
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FRONTEND_ORIGINS
+        value: "*"
+      - key: PYTHON_VERSION
+        value: "3.11"
+    healthCheckPath: /health
