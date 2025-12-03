@@ -1,6 +1,7 @@
 __pycache__/
 venv/
 SamplArd/
+.env
 
 # Logs
 logs
