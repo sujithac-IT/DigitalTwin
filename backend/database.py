@@ -1,14 +1,19 @@
 import os
+import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.pool import NullPool
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("SUPABASE_URI")
+
 if not DATABASE_URL:
     # Optional fallback to local SQLite for dev if env missing
     DATABASE_URL = "sqlite:///./local.db"
+    logger.info("No SUPABASE_URI found, using local SQLite database")
 else:
     # Ensure SSL is required for Supabase Postgres connections
     if DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://"):
@@ -16,10 +21,28 @@ else:
         if DATABASE_URL.startswith("postgres://"):
             DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
         
-        # Add SSL mode if not present
-        if "sslmode=" not in DATABASE_URL:
-            sep = "&" if "?" in DATABASE_URL else "?"
-            DATABASE_URL = f"{DATABASE_URL}{sep}sslmode=require"
+        # For Supabase free tier: Use Connection Pooler (IPv4) instead of Direct Connection (IPv6)
+        # Connection Pooler uses port 6543 and pooler.supabase.com
+        # This is necessary because Render/most cloud providers don't support IPv6
+        
+        # Validate connection type and log appropriate message
+        if "pooler.supabase.com" in DATABASE_URL and ":6543" in DATABASE_URL:
+            logger.info("✅ Using Supabase Connection Pooler (IPv4) - Render compatible!")
+        elif "db." in DATABASE_URL and ":5432" in DATABASE_URL:
+            logger.error(
+                "❌ Using Direct Connection (IPv6) - This WILL FAIL on Render! "
+                "You must use Supabase Connection Pooler (port 6543) for IPv4 support. "
+                "Get it from: Supabase Dashboard → Database → Connection String → 'Transaction' mode"
+            )
+        
+        # Add connection parameters for Supabase
+        if "?" in DATABASE_URL:
+            if "sslmode=" not in DATABASE_URL:
+                DATABASE_URL += "&sslmode=require"
+            if "connect_timeout=" not in DATABASE_URL:
+                DATABASE_URL += "&connect_timeout=10"
+        else:
+            DATABASE_URL += "?sslmode=require&connect_timeout=10"
 
 
 class Base(DeclarativeBase):
@@ -27,15 +50,17 @@ class Base(DeclarativeBase):
 
 
 # Connection pool settings optimized for serverless/Render
+# Use NullPool for serverless to prevent connection pool exhaustion
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,  # Verify connections before using them
-    pool_size=5,  # Smaller pool for serverless
-    max_overflow=10,  # Max additional connections
-    pool_recycle=3600,  # Recycle connections after 1 hour
+    poolclass=NullPool,  # No connection pooling - each request gets new connection (best for serverless)
+    echo=False,  # Set to True for SQL query debugging
     connect_args={
-        "connect_timeout": 10,  # 10 second connection timeout
-        "options": "-c statement_timeout=30000",  # 30 second query timeout
+        "connect_timeout": 10,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
     } if DATABASE_URL.startswith("postgresql://") else {},
 )
 
