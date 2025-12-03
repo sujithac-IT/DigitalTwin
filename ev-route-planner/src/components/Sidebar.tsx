@@ -9,6 +9,7 @@ import {
   LogOut,
   Zap,
   User as UserIcon,
+  HeadphonesIcon,
 } from 'lucide-react';
 import { useEV } from '@/contexts/EVContext';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,7 @@ export const Sidebar = ({ className }: SidebarProps) => {
     { path: '/map', icon: MapPin, label: 'Map' },
     { path: '/services', icon: Wrench, label: 'Services' },
     { path: '/history', icon: History, label: 'History' },
+    { path: '/contact-support', icon: HeadphonesIcon, label: 'Contact Support' },
     { path: '/settings', icon: Settings, label: 'Settings' },
   ];
 

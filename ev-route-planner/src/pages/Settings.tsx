@@ -272,30 +272,6 @@ const Settings = () => {
           </CardContent>
         </Card>
 
-        {/* Customer Service */}
-        <Card className="border-2">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Phone className="w-5 h-5 text-accent" />
-              Customer Service
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Button variant="outline" className="w-full justify-start">
-              <Phone className="w-4 h-4 mr-2" />
-              Call Support: 1800-XXX-XXXX
-            </Button>
-            <Button variant="outline" className="w-full justify-start">
-              <Phone className="w-4 h-4 mr-2" />
-              Emergency Roadside: 1800-YYY-YYYY
-            </Button>
-            <Button variant="outline" className="w-full justify-start">
-              <Shield className="w-4 h-4 mr-2" />
-              Service Centers Near Me
-            </Button>
-          </CardContent>
-        </Card>
-
         {/* Security & Privacy */}
         <Card className="border-2">
           <CardHeader>

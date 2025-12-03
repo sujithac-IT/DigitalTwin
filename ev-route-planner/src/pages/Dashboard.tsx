@@ -33,7 +33,7 @@ import { useToast } from '@/hooks/use-toast';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { speak, user, setUser } = useEV();
+  const { speak, user, setUser, voiceAssistantActive } = useEV();
   const { data: sensor, error: sensorError, loading: sensorLoading } = useLatestSensorData();
   const [tip, setTip] = useState('');
   const [ecoRange, setEcoRange] = useState(0);
@@ -49,12 +49,110 @@ const Dashboard = () => {
   const voltage = sensor?.voltage ?? 0;
   const current = sensor?.current ?? 0;
   const temperature = sensor?.temperature ?? 0;
-  const soh = sensor?.soh ?? 95; // Now fetched from backend (calculated from historical voltage patterns)
   
-  // Simple SOC estimation: assume 12V nominal, with 11V=0% and 14V=100%
-  const soc = voltage > 0 ? Math.max(0, Math.min(100, ((voltage - 11) / 3) * 100)) : 0;
-  const dte = Math.round(soc * 3.2); // Estimate range based on SOC
-  const status = soc < 20 ? 'Low Battery' : temperature > 45 ? 'Overheating' : 'Normal';
+  // Simulated SOC that decreases over time (starts at 85%, decreases 2% every 6 seconds)
+  // Always resets to 85% on page refresh
+  const [simulatedSoc, setSimulatedSoc] = useState<number>(85);
+  
+  // Simulated SOH that fluctuates realistically (92-96%)
+  // Always resets to 94% on page refresh
+  const [simulatedSoh, setSimulatedSoh] = useState<number>(94);
+  
+  // Simulated DTE fluctuation offset (-5 to +5 km)
+  const [dteFluctuation, setDteFluctuation] = useState<number>(0);
+  
+  const [hasTriggered20Alert, setHasTriggered20Alert] = useState(false);
+  const [hasTriggered60Alert, setHasTriggered60Alert] = useState(false);
+  
+  // Clear localStorage on component mount to ensure fresh start
+  useEffect(() => {
+    localStorage.removeItem('simulatedSoc');
+    localStorage.removeItem('simulatedSoh');
+    localStorage.removeItem('lowBatteryAlertTriggered');
+  }, []);
+  
+  // SOC simulation - decrease 2% every 6 seconds, stops at 0%
+  useEffect(() => {
+    // Only run interval if SOC is above 0
+    if (simulatedSoc <= 0) {
+      return; // Stop the interval if battery is at 0%
+    }
+
+    const interval = setInterval(() => {
+      setSimulatedSoc((prevSoc) => {
+        const newSoc = Math.max(0, prevSoc - 2); // Decrease by 2%, minimum 0%
+        return newSoc;
+      });
+    }, 6000); // Run every 6 seconds
+
+    return () => clearInterval(interval);
+  }, [simulatedSoc]); // Re-run when simulatedSoc changes to stop at 0
+  
+  // SOH fluctuation - varies between 92-96% every 15 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSimulatedSoh((prevSoh) => {
+        // Fluctuate ±2% around 94%
+        const variation = (Math.random() - 0.5) * 4; // -2 to +2
+        const newSoh = Math.max(92, Math.min(96, 94 + variation));
+        const roundedSoh = Math.round(newSoh * 10) / 10; // Round to 1 decimal
+        return roundedSoh;
+      });
+    }, 15000); // Every 15 seconds
+
+    return () => clearInterval(interval);
+  }, []);
+  
+  // DTE fluctuation - varies ±5 km every 8 seconds to simulate driving conditions
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDteFluctuation((Math.random() - 0.5) * 10); // -5 to +5 km
+    }, 8000); // Every 8 seconds
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Trigger alert when SOC reaches 60%
+  useEffect(() => {
+    if (voiceAssistantActive && simulatedSoc <= 60 && simulatedSoc > 58 && !hasTriggered60Alert) {
+      speak('Attention! Battery level has dropped to 60 percent. Consider planning your next charge soon.');
+      toast({
+        title: '⚠️ Medium Battery Warning',
+        description: 'Battery level at 60%. Plan your charging strategy.',
+        variant: 'default',
+      });
+      setHasTriggered60Alert(true);
+    }
+    
+    // Reset alert flag when SOC goes above 60%
+    if (simulatedSoc > 60) {
+      setHasTriggered60Alert(false);
+    }
+  }, [simulatedSoc, hasTriggered60Alert, speak, toast, voiceAssistantActive]);
+
+  // Trigger alert when SOC reaches 20%
+  useEffect(() => {
+    if (voiceAssistantActive && simulatedSoc <= 20 && simulatedSoc > 18 && !hasTriggered20Alert) {
+      speak('Warning! Battery level is critically low at 20 percent. Please charge your vehicle soon to avoid getting stranded.');
+      toast({
+        title: '⚠️ Low Battery Alert',
+        description: 'Battery level has reached 20%. Please charge soon!',
+        variant: 'destructive',
+      });
+      setHasTriggered20Alert(true);
+    }
+    
+    // Reset alert flag when SOC goes above 20%
+    if (simulatedSoc > 20) {
+      setHasTriggered20Alert(false);
+    }
+  }, [simulatedSoc, hasTriggered20Alert, speak, toast, voiceAssistantActive]);
+
+  const soc = Math.round(simulatedSoc); // Use simulated SOC
+  const soh = Math.round(simulatedSoh * 10) / 10; // Use simulated SOH with 1 decimal
+  const baseDte = Math.round(soc * 3.2); // Base range estimate
+  const dte = Math.max(0, Math.round(baseDte + dteFluctuation)); // Add fluctuation
+  const status = soc < 20 ? 'Low Battery' : soc < 60 ? 'Medium Battery' : temperature > 45 ? 'Overheating' : 'Normal';
 
   const batteryData = { soc, soh, temperature, dte, status };
 
@@ -139,8 +237,15 @@ const Dashboard = () => {
 
   const getStatusColor = () => {
     if (status === 'Normal') return 'bg-success/20 text-success border-success/30';
-    if (status === 'Low Battery') return 'bg-warning/20 text-warning border-warning/30';
+    if (status === 'Medium Battery') return 'bg-warning/20 text-warning border-warning/30';
+    if (status === 'Low Battery') return 'bg-destructive/20 text-destructive border-destructive/30';
     return 'bg-destructive/20 text-destructive border-destructive/30';
+  };
+
+  const getBatteryCardColor = () => {
+    if (soc >= 60) return 'border-success/50 bg-gradient-to-br from-success/5 to-success/10';
+    if (soc >= 20) return 'border-warning/50 bg-gradient-to-br from-warning/5 to-warning/10';
+    return 'border-destructive/50 bg-gradient-to-br from-destructive/5 to-destructive/10';
   };
 
   const calculateChargingTime = (power: number, targetSoc: number = 80) => {
@@ -230,7 +335,7 @@ const Dashboard = () => {
           {/* Left Column - Battery Status */}
           <div className="lg:col-span-4 space-y-6">
             {/* Main Battery Card */}
-            <Card className="border-2">
+            <Card className={`border-2 transition-all duration-500 ${getBatteryCardColor()}`}>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
@@ -467,7 +572,7 @@ const Dashboard = () => {
         {/* Mobile Layout - Original Single Column */}
         <div className="lg:hidden space-y-6">
           {/* Main Battery Card */}
-          <Card className="border-2 shadow-xl overflow-hidden">
+          <Card className={`border-2 shadow-xl overflow-hidden transition-all duration-500 ${getBatteryCardColor()}`}>
             <div className="bg-gradient-to-br from-primary/10 to-accent/10 p-6">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-2">
