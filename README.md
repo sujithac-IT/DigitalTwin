@@ -347,6 +347,4 @@ Arduino/ESP32 should POST JSON with `Content-Type: application/json` to `http://
 
 ---
 
-**Built with ❤️ for a sustainable EV future**
-
-*Last Updated: December 2025*
+**Built with AI for a sustainable EV future**
